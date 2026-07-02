@@ -13,15 +13,25 @@ set -euo pipefail
 # OpenClaw and skips onboarding (with instructions to run it yourself).
 #
 # Env toggles:
+#   OPENCLAW_VERSION       npm install target, pinned by default (set 'latest' for newest)
 #   RUN_ONBOARD=0          install only, skip `openclaw onboard`
 #   INSTALL_DAEMON=0       onboard without installing the persistent gateway daemon
 #   NODE_SETUP_MAJOR       NodeSource series to install if Node is missing/too old (default 24)
+#   NODE_EXACT_VERSION     exact NodeSource package to pin (empty = series latest)
 #   AUTO_APPROVE_DEVICES=0 do NOT auto-approve browser/device pairing after install
 #   AUTO_APPROVE_MINUTES   how long to auto-approve new pairings (default 20)
 
 OPENCLAW_INSTALL_URL="${OPENCLAW_INSTALL_URL:-https://openclaw.ai/install.sh}"
+# Pin OpenClaw to a known-good version for the hackathon so an upstream release
+# can't change what gets installed mid-event. Set to 'latest' (or a semver/spec)
+# to override. Verified good: 2026.6.11 (npm 'latest' dist-tag as of 2026-07-02).
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.6.11}"
 NODE_MAJOR_MIN="${NODE_MAJOR_MIN:-22}"
 NODE_SETUP_MAJOR="${NODE_SETUP_MAJOR:-24}"
+# Pin the exact NodeSource package for the hackathon. Empty = latest of the
+# NODE_SETUP_MAJOR series. NodeSource retains old versions, so this stays
+# installable. Verified good: 24.18.0-1nodesource1 (2026-07-02).
+NODE_EXACT_VERSION="${NODE_EXACT_VERSION:-24.18.0-1nodesource1}"
 RUN_ONBOARD="${RUN_ONBOARD:-1}"
 INSTALL_DAEMON="${INSTALL_DAEMON:-1}"
 # On a Brev host, allow the public tunnel origin (https://openclaw-<id>.brevlab.com)
@@ -78,14 +88,19 @@ ensure_node() {
     return
   fi
 
-  log "Installing Node.js ${NODE_SETUP_MAJOR} from NodeSource"
+  log "Installing Node.js ${NODE_EXACT_VERSION:-${NODE_SETUP_MAJOR}.x} from NodeSource"
   require_cmd curl
   command -v apt-get >/dev/null 2>&1 || fail "This script currently supports Ubuntu/Debian environments with apt-get"
 
   run_as_root apt-get update
   run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_SETUP_MAJOR}.x" | run_as_root bash -
-  run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+  # Pin the exact package version when set; fall back to the series' latest.
+  if [[ -n "${NODE_EXACT_VERSION:-}" ]]; then
+    run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "nodejs=${NODE_EXACT_VERSION}"
+  else
+    run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+  fi
 
   log "Installed Node.js $(node --version)"
 }
@@ -116,10 +131,11 @@ ensure_openclaw_on_path() {
 
 install_openclaw() {
   require_cmd curl
-  log "Installing latest stable OpenClaw via the official installer (${OPENCLAW_INSTALL_URL})"
+  log "Installing OpenClaw ${OPENCLAW_VERSION} via the official installer (${OPENCLAW_INSTALL_URL})"
   # --no-onboard: install only; we run onboarding explicitly below so it is
   # not silently skipped or double-run.
-  curl -fsSL "$OPENCLAW_INSTALL_URL" | bash -s -- --no-onboard
+  # OPENCLAW_VERSION pins the npm install target (openclaw@<version>).
+  curl -fsSL "$OPENCLAW_INSTALL_URL" | OPENCLAW_VERSION="$OPENCLAW_VERSION" bash -s -- --no-onboard
 
   ensure_openclaw_on_path
   command -v openclaw >/dev/null 2>&1 || fail "OpenClaw installed but 'openclaw' is not on PATH (looked in ~/.npm-global/bin, ~/.local/bin, npm prefix). Open a new shell and re-run."
@@ -213,7 +229,7 @@ HLP
 
 # Print the Control UI URL (Brev tunnel when on Brev, else localhost) and the token.
 print_dashboard_info() {
-  local h id origin token dash url
+  local h id origin token url cfg
   if ! command -v openclaw >/dev/null 2>&1; then
     log "openclaw not on PATH; cannot print dashboard info"
     return
@@ -227,18 +243,24 @@ print_dashboard_info() {
     origin="http://127.0.0.1:18789"
   fi
 
-  # Prefer the token from the dashboard URL; fall back to config.
-  dash="$(openclaw dashboard --no-open 2>/dev/null || true)"
-  token="$(printf '%s\n' "$dash" | sed -nE 's#.*[#?]token=([A-Za-z0-9]+).*#\1#p' | head -n1)"
-  if [[ -z "$token" ]]; then
-    token="$(openclaw config get gateway.auth.token 2>/dev/null | tr -d '"' | head -n1)"
+  # Read the raw token directly from the on-disk config. The openclaw CLI
+  # redacts secrets in its output (prints __OPENCLAW_REDACTED__), so neither
+  # `openclaw dashboard` nor `openclaw config get` can recover the real token.
+  cfg="${OPENCLAW_HOME:-$HOME/.openclaw}/openclaw.json"
+  token=""
+  if [[ -f "$cfg" ]]; then
+    if command -v jq >/dev/null 2>&1; then
+      token="$(jq -r '.gateway.auth.token // empty' "$cfg" 2>/dev/null)"
+    elif command -v python3 >/dev/null 2>&1; then
+      token="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("gateway",{}).get("auth",{}).get("token",""))' "$cfg" 2>/dev/null)"
+    fi
   fi
 
   if [[ -n "$token" && "$token" != "__OPENCLAW_REDACTED__" && "$token" != "null" ]]; then
     url="${origin}/#token=${token}"
   else
     url="${origin}/"
-    token="(unavailable — run: openclaw config get gateway.auth.token)"
+    token="(unavailable — run: jq -r '.gateway.auth.token' ${cfg})"
   fi
 
   printf '\n'

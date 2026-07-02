@@ -15,6 +15,11 @@ INSTALL_RDP="${INSTALL_RDP:-1}"
 RDP_PASSWORD="${RDP_PASSWORD:-openclaw}"
 INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-1}"
 INSTALL_CODEX="${INSTALL_CODEX:-1}"
+# Pin the agent CLIs to known-good versions for the hackathon so upstream
+# releases can't change them mid-event. Set to 'stable'/'latest' to unpin.
+# Verified good as of 2026-07-02.
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.198}"
+CODEX_VERSION="${CODEX_VERSION:-0.142.5}"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="${HOME}"
 
@@ -299,17 +304,21 @@ install_rdp() {
 }
 
 install_claude_code() {
-  log "Installing Claude Code"
+  log "Installing Claude Code ${CLAUDE_CODE_VERSION}"
   require_cmd curl
-  run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+  # The installer takes the target version (stable|latest|X.Y.Z) as its first arg.
+  run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" CLAUDE_CODE_VERSION="$CLAUDE_CODE_VERSION" \
+    bash -c 'curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION"'
   log "Claude Code installed for ${TARGET_USER}"
 }
 
 install_codex() {
-  log "Installing Codex"
+  log "Installing Codex ${CODEX_VERSION}"
   require_cmd curl
   # CODEX_NON_INTERACTIVE=1 skips the installer's "Start Codex now? [y/N]" tty prompt.
-  run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" CODEX_NON_INTERACTIVE=1 sh -c 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
+  # CODEX_RELEASE pins the version (latest|X.Y.Z).
+  run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" CODEX_NON_INTERACTIVE=1 CODEX_RELEASE="$CODEX_VERSION" \
+    sh -c 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
   log "Codex installed for ${TARGET_USER}"
 }
 

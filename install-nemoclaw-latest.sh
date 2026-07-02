@@ -29,8 +29,15 @@ set -euo pipefail
 #   CHAT_UI_URL                 explicit Control UI origin (default on Brev: https://openclaw-<id>.brevlab.com)
 #   INSTALL_DOCS_MCP=0          do NOT register the NemoClaw docs MCP server with Claude Code
 #   NEMOCLAW_INSTALL_URL        override installer URL (default: https://www.nvidia.com/nemoclaw.sh)
+#   NEMOCLAW_INSTALL_REF        pinned Git ref/SHA to install (default: frozen lkg SHA)
+#   NEMOCLAW_INSTALL_TAG        Git tag to install instead (e.g. lkg, v0.0.72)
 
 NEMOCLAW_INSTALL_URL="${NEMOCLAW_INSTALL_URL:-https://www.nvidia.com/nemoclaw.sh}"
+# Pin NemoClaw to a known-good Git ref for the hackathon. The upstream default
+# 'lkg' is a MOVING pointer, so we freeze to the exact SHA it resolved to on
+# 2026-07-02 (tag 'lkg' -> e4b9111). Override with NEMOCLAW_INSTALL_REF (exact
+# ref/SHA) or NEMOCLAW_INSTALL_TAG (e.g. lkg, v0.0.72).
+NEMOCLAW_INSTALL_REF="${NEMOCLAW_INSTALL_REF:-e4b9111f5f0535c2fc3d6fbe8dc8dca101a6fdce}"
 ACCEPT_THIRD_PARTY="${ACCEPT_THIRD_PARTY:-1}"
 FULL_WIZARD="${FULL_WIZARD:-0}"
 NEMOCLAW_PROVIDER="${NEMOCLAW_PROVIDER:-build}"
@@ -148,6 +155,9 @@ install_nemoclaw() {
   require_cmd curl
   local envs=()
 
+  # Freeze the installed ref so a moving 'lkg' can't change the build mid-event.
+  [[ -n "${NEMOCLAW_INSTALL_REF:-}" ]] && envs+=("NEMOCLAW_INSTALL_REF=${NEMOCLAW_INSTALL_REF}")
+
   [[ "$ACCEPT_THIRD_PARTY" == "1" ]] && envs+=("NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1")
 
   resolve_chat_ui_url
@@ -170,7 +180,7 @@ install_nemoclaw() {
     log "Installing NemoClaw with preset settings (provider=${NEMOCLAW_PROVIDER}, sandbox=${SANDBOX_NAME})"
   fi
 
-  log "Installer: ${NEMOCLAW_INSTALL_URL}"
+  log "Installer: ${NEMOCLAW_INSTALL_URL} (ref: ${NEMOCLAW_INSTALL_REF:-lkg})"
   # The installer reads the script on stdin; onboarding reads the terminal via
   # /dev/tty, so interactive prompts (FULL_WIZARD) still work in a real shell.
   if [[ "${#envs[@]}" -gt 0 ]]; then

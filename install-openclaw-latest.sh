@@ -20,6 +20,7 @@ set -euo pipefail
 #   NODE_EXACT_VERSION     exact NodeSource package to pin (empty = series latest)
 #   AUTO_APPROVE_DEVICES=0 do NOT auto-approve browser/device pairing after install
 #   AUTO_APPROVE_MINUTES   how long to auto-approve new pairings (default 20)
+#   INSTALL_DOCS_MCP=0     do NOT register the OpenShell docs MCP with Claude Code/Codex
 
 OPENCLAW_INSTALL_URL="${OPENCLAW_INSTALL_URL:-https://openclaw.ai/install.sh}"
 # Pin OpenClaw to a known-good version for the hackathon so an upstream release
@@ -41,6 +42,10 @@ ALLOW_BREV_ORIGIN="${ALLOW_BREV_ORIGIN:-1}"
 # participants don't hit the "device pairing required" wall. Token is still required.
 AUTO_APPROVE_DEVICES="${AUTO_APPROVE_DEVICES:-1}"
 AUTO_APPROVE_MINUTES="${AUTO_APPROVE_MINUTES:-20}"
+# Register the OpenShell docs MCP server with Claude Code / Codex (if installed),
+# so the agent can look up OpenShell (sandbox runtime) documentation.
+INSTALL_DOCS_MCP="${INSTALL_DOCS_MCP:-1}"
+OPENSHELL_DOCS_MCP_URL="${OPENSHELL_DOCS_MCP_URL:-https://docs.nvidia.com/openshell/_mcp/server}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -272,6 +277,40 @@ print_dashboard_info() {
   printf '====================================================\n'
 }
 
+# Register a docs MCP server (name + URL) with Claude Code and/or Codex,
+# idempotently. Advises a manual command if neither CLI is present.
+add_docs_mcp() {
+  local name="openshell-docs" url="$OPENSHELL_DOCS_MCP_URL" found=0
+
+  if command -v claude >/dev/null 2>&1; then
+    found=1
+    if claude mcp list 2>/dev/null | grep -q "$url"; then
+      log "${name} MCP already registered with Claude Code"
+    else
+      log "Registering ${name} MCP with Claude Code (user scope)"
+      claude mcp add --scope user --transport http "$name" "$url" \
+        || log "  Failed; add manually: claude mcp add --scope user --transport http ${name} ${url}"
+    fi
+  fi
+
+  if command -v codex >/dev/null 2>&1; then
+    found=1
+    if codex mcp list 2>/dev/null | grep -q "$url"; then
+      log "${name} MCP already registered with Codex"
+    else
+      log "Registering ${name} MCP with Codex"
+      codex mcp add "$name" --url "$url" \
+        || log "  Failed; add manually: codex mcp add ${name} --url ${url}"
+    fi
+  fi
+
+  if [[ "$found" == "0" ]]; then
+    log "Neither Claude Code nor Codex found; skipping OpenShell docs MCP. Add later:"
+    log "  Claude: claude mcp add --scope user --transport http ${name} ${url}"
+    log "  Codex:  codex mcp add ${name} --url ${url}"
+  fi
+}
+
 main() {
   require_non_root
   require_cmd curl
@@ -295,6 +334,13 @@ main() {
 
   if [[ "$AUTO_APPROVE_DEVICES" == "1" ]]; then
     auto_approve_devices
+  fi
+
+  if [[ "$INSTALL_DOCS_MCP" == "1" ]]; then
+    log "Registering OpenShell docs MCP with Claude Code / Codex"
+    add_docs_mcp
+  else
+    log "Skipping OpenShell docs MCP (INSTALL_DOCS_MCP=0)"
   fi
 
   log "Done. If 'openclaw' is not found, run 'source ~/.profile' or open a new shell."

@@ -21,6 +21,12 @@ set -euo pipefail
 #
 # Env toggles:
 #   NVIDIA_INFERENCE_API_KEY    your nvapi-... key (build.nvidia.com); if set, no prompt
+#   NEMOCLAW_POLICY_MODE        enforce (default) | advisory — enforce actively BLOCKS
+#                               unlisted traffic (required for the hands-on deny-by-default
+#                               demo). advisory only logs; nothing is denied.
+#   NEMOCLAW_POLICY_TIER        restricted (default) | balanced | open — starting preset
+#                               posture. restricted = inference + core tooling only; open
+#                               doors later with `nemoclaw <sandbox> policy-add`.
 #   SANDBOX_NAME                sandbox name (default: my-assistant)
 #   NEMOCLAW_PROVIDER           inference provider (default: build = NVIDIA endpoints)
 #   ACCEPT_THIRD_PARTY=0        do NOT auto-accept third-party software (installer will prompt)
@@ -42,15 +48,22 @@ ACCEPT_THIRD_PARTY="${ACCEPT_THIRD_PARTY:-1}"
 FULL_WIZARD="${FULL_WIZARD:-0}"
 NEMOCLAW_PROVIDER="${NEMOCLAW_PROVIDER:-build}"
 SANDBOX_NAME="${SANDBOX_NAME:-my-assistant}"
+# Hands-on session posture: start strict (deny-by-default actively enforced,
+# minimal presets) and open scoped doors during the session. Override either to
+# relax. See 06_nemoclaw-hands-on-session.md, Module 4.
+NEMOCLAW_POLICY_MODE="${NEMOCLAW_POLICY_MODE:-enforce}"
+NEMOCLAW_POLICY_TIER="${NEMOCLAW_POLICY_TIER:-restricted}"
 # On a Brev host, tell the sandbox to allow the public tunnel origin for the
 # Control UI. The sandbox derives gateway.controlUi.allowedOrigins from
 # CHAT_UI_URL at build time, so this must be set BEFORE the sandbox is built.
 ALLOW_BREV_ORIGIN="${ALLOW_BREV_ORIGIN:-1}"
 CHAT_UI_URL="${CHAT_UI_URL:-}"
-# Register the NemoClaw docs MCP server with Claude Code (if installed), so the
-# agent can look up NemoClaw docs. https://docs.nvidia.com/nemoclaw/.../agent-skills
+# Register the NemoClaw + OpenShell docs MCP servers with Claude Code / Codex (if
+# installed), so the agent can look up NemoClaw and OpenShell docs.
+# https://docs.nvidia.com/nemoclaw/.../agent-skills
 INSTALL_DOCS_MCP="${INSTALL_DOCS_MCP:-1}"
 DOCS_MCP_URL="${DOCS_MCP_URL:-https://docs.nvidia.com/nemoclaw/_mcp/server}"
+OPENSHELL_DOCS_MCP_URL="${OPENSHELL_DOCS_MCP_URL:-https://docs.nvidia.com/openshell/_mcp/server}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"
@@ -119,6 +132,8 @@ prompt_for_key() {
   printf '\nNemoClaw will be installed with these preset settings:\n'
   printf '  Provider:        NVIDIA (%s)\n' "$NEMOCLAW_PROVIDER"
   printf '  Sandbox name:    %s\n' "$SANDBOX_NAME"
+  printf '  Policy mode:     %s\n' "$NEMOCLAW_POLICY_MODE"
+  printf '  Policy tier:     %s\n' "$NEMOCLAW_POLICY_TIER"
   printf '  Web search:      skipped\n'
   printf '  Msg channels:    skipped\n'
   printf '  (override with FULL_WIZARD=1 to choose everything yourself)\n\n'
@@ -160,6 +175,10 @@ install_nemoclaw() {
 
   [[ "$ACCEPT_THIRD_PARTY" == "1" ]] && envs+=("NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1")
 
+  # Security posture (applies to both preset and wizard paths).
+  [[ -n "$NEMOCLAW_POLICY_MODE" ]] && envs+=("NEMOCLAW_POLICY_MODE=${NEMOCLAW_POLICY_MODE}")
+  [[ -n "$NEMOCLAW_POLICY_TIER" ]] && envs+=("NEMOCLAW_POLICY_TIER=${NEMOCLAW_POLICY_TIER}")
+
   resolve_chat_ui_url
   [[ -n "$CHAT_UI_URL" ]] && envs+=("CHAT_UI_URL=${CHAT_UI_URL}")
 
@@ -194,38 +213,48 @@ install_nemoclaw() {
   log "NemoClaw available at $(command -v nemoclaw)"
 }
 
-# Register the NemoClaw docs MCP server (agent-skills Method 1) with Claude Code
-# and/or Codex, so the agent can look up NemoClaw documentation. Each is optional.
-add_docs_mcp() {
-  local any=0
+# Register one docs MCP server (name + URL) with Claude Code and/or Codex,
+# idempotently. Returns 1 if neither CLI is present so the caller can advise.
+_register_mcp() {
+  local name="$1" url="$2" found=0
 
   if command -v claude >/dev/null 2>&1; then
-    any=1
-    if claude mcp list 2>/dev/null | grep -q "$DOCS_MCP_URL"; then
-      log "NemoClaw docs MCP already registered with Claude Code"
+    found=1
+    if claude mcp list 2>/dev/null | grep -q "$url"; then
+      log "${name} MCP already registered with Claude Code"
     else
-      log "Registering NemoClaw docs MCP with Claude Code (user scope)"
-      claude mcp add --scope user --transport http nemoclaw-docs "$DOCS_MCP_URL" \
-        || log "  Failed; add manually: claude mcp add --scope user --transport http nemoclaw-docs ${DOCS_MCP_URL}"
+      log "Registering ${name} MCP with Claude Code (user scope)"
+      claude mcp add --scope user --transport http "$name" "$url" \
+        || log "  Failed; add manually: claude mcp add --scope user --transport http ${name} ${url}"
     fi
   fi
 
   if command -v codex >/dev/null 2>&1; then
-    any=1
-    if codex mcp list 2>/dev/null | grep -q "$DOCS_MCP_URL"; then
-      log "NemoClaw docs MCP already registered with Codex"
+    found=1
+    if codex mcp list 2>/dev/null | grep -q "$url"; then
+      log "${name} MCP already registered with Codex"
     else
-      log "Registering NemoClaw docs MCP with Codex"
-      codex mcp add nemoclaw-docs --url "$DOCS_MCP_URL" \
-        || log "  Failed; add manually: codex mcp add nemoclaw-docs --url ${DOCS_MCP_URL}"
+      log "Registering ${name} MCP with Codex"
+      codex mcp add "$name" --url "$url" \
+        || log "  Failed; add manually: codex mcp add ${name} --url ${url}"
     fi
   fi
 
-  if [[ "$any" == "0" ]]; then
-    log "Neither Claude Code nor Codex found; skipping NemoClaw docs MCP. Add later:"
+  [[ "$found" == "1" ]]
+}
+
+# Register the NemoClaw + OpenShell docs MCP servers (agent-skills Method 1) so the
+# agent can look up documentation for both layers of the stack. Each is optional.
+add_docs_mcp() {
+  if ! _register_mcp nemoclaw-docs "$DOCS_MCP_URL"; then
+    log "Neither Claude Code nor Codex found; skipping docs MCP. Add later:"
     log "  Claude: claude mcp add --scope user --transport http nemoclaw-docs ${DOCS_MCP_URL}"
+    log "          claude mcp add --scope user --transport http openshell-docs ${OPENSHELL_DOCS_MCP_URL}"
     log "  Codex:  codex mcp add nemoclaw-docs --url ${DOCS_MCP_URL}"
+    log "          codex mcp add openshell-docs --url ${OPENSHELL_DOCS_MCP_URL}"
+    return
   fi
+  _register_mcp openshell-docs "$OPENSHELL_DOCS_MCP_URL"
 }
 
 print_dashboard_info() {

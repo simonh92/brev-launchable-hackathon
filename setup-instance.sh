@@ -15,11 +15,10 @@ INSTALL_RDP="${INSTALL_RDP:-1}"
 RDP_PASSWORD="${RDP_PASSWORD:-openclaw}"
 INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-1}"
 INSTALL_CODEX="${INSTALL_CODEX:-1}"
-# Pin the agent CLIs to known-good versions for the hackathon so upstream
-# releases can't change them mid-event. Set to 'stable'/'latest' to unpin.
-# Verified good as of 2026-07-02.
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.198}"
-CODEX_VERSION="${CODEX_VERSION:-0.142.5}"
+# Install the latest agent CLIs. Pin to a specific X.Y.Z here only if you need
+# a reproducible version for an event.
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-latest}"
+CODEX_VERSION="${CODEX_VERSION:-latest}"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="${HOME}"
 

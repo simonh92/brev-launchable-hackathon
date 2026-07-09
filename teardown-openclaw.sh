@@ -44,6 +44,49 @@ run() {
   fi
 }
 
+load_nvm() {
+  local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  if [ -s "$nvm_dir/nvm.sh" ]; then
+    # shellcheck disable=SC1090
+    . "$nvm_dir/nvm.sh" >/dev/null 2>&1 || true
+  fi
+}
+
+show_nvm_packages() {
+  local pkg version_dir
+  [ -d "$HOME/.nvm/versions/node" ] || return 0
+  for version_dir in "$HOME"/.nvm/versions/node/*; do
+    [ -d "$version_dir" ] || continue
+    for pkg in "$@"; do
+      { [ -e "$version_dir/bin/$pkg" ] || [ -L "$version_dir/bin/$pkg" ]; } && echo "    present: $version_dir/bin/$pkg"
+      { [ -e "$version_dir/lib/node_modules/$pkg" ] || [ -L "$version_dir/lib/node_modules/$pkg" ]; } && echo "    present: $version_dir/lib/node_modules/$pkg"
+    done
+  done
+}
+
+remove_nvm_packages() {
+  local pkg version_dir removed
+  [ -d "$HOME/.nvm/versions/node" ] || return 0
+  for version_dir in "$HOME"/.nvm/versions/node/*; do
+    [ -d "$version_dir" ] || continue
+    for pkg in "$@"; do
+      if [ -e "$version_dir/bin/$pkg" ] || [ -L "$version_dir/bin/$pkg" ] ||
+         [ -e "$version_dir/lib/node_modules/$pkg" ] || [ -L "$version_dir/lib/node_modules/$pkg" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+          printf '  would: rm -rf %s %s\n' "$version_dir/bin/$pkg" "$version_dir/lib/node_modules/$pkg"
+        else
+          removed="$(basename "$version_dir")/$pkg"
+          rm -rf "$version_dir/bin/$pkg" "$version_dir/lib/node_modules/$pkg" \
+            && ok "removed nvm package $removed" \
+            || warn "skipped/failed: remove nvm package $removed"
+        fi
+      fi
+    done
+  done
+}
+
+load_nvm
+
 echo
 log "=== 1/6  Inspecting current OpenClaw footprint ==="
 echo "  binaries:"
@@ -56,6 +99,7 @@ for d in ~/.config/openclaw ~/.local/state/openclaw ~/.local/share/openclaw \
          ~/.cache/openclaw ~/.openclaw ~/.npm-global/lib/node_modules/openclaw; do
   [ -e "$d" ] && echo "    present: $d" || true
 done
+show_nvm_packages openclaw
 echo "  systemd user services:"
 systemctl --user list-unit-files 2>/dev/null | grep -i openclaw | sed 's/^/    /' || echo "    (none / systemd unavailable)"
 echo "  linger status: $(loginctl show-user "$USER" 2>/dev/null | grep -i linger || echo 'unknown')"
@@ -87,6 +131,7 @@ fi
 log "=== 4/6  Removing CLI (npm global) ==="
 run "npm rm -g openclaw" npm rm -g openclaw
 run "rm ~/.npm-global/bin/openclaw" rm -f "$HOME/.npm-global/bin/openclaw"
+remove_nvm_packages openclaw
 
 log "=== 5/6  Removing config / state / data dirs ==="
 for d in "$HOME/.config/openclaw" "$HOME/.local/state/openclaw" \

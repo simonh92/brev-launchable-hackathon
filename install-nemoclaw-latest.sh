@@ -21,9 +21,9 @@ set -euo pipefail
 #
 # Env toggles:
 #   NVIDIA_INFERENCE_API_KEY    your nvapi-... key (build.nvidia.com); if set, no prompt
-#   NEMOCLAW_POLICY_MODE        enforce (default) | advisory — enforce actively BLOCKS
-#                               unlisted traffic (required for the hands-on deny-by-default
-#                               demo). advisory only logs; nothing is denied.
+#   NEMOCLAW_POLICY_MODE        suggested (default) | custom | skip — how policy
+#                               presets are selected. The current pinned installer
+#                               rejects the older enforce/advisory values.
 #   NEMOCLAW_POLICY_TIER        restricted (default) | balanced | open — starting preset
 #                               posture. restricted = inference + core tooling only; open
 #                               doors later with `nemoclaw <sandbox> policy-add`.
@@ -48,10 +48,9 @@ ACCEPT_THIRD_PARTY="${ACCEPT_THIRD_PARTY:-1}"
 FULL_WIZARD="${FULL_WIZARD:-0}"
 NEMOCLAW_PROVIDER="${NEMOCLAW_PROVIDER:-build}"
 SANDBOX_NAME="${SANDBOX_NAME:-my-assistant}"
-# Hands-on session posture: start strict (deny-by-default actively enforced,
-# minimal presets) and open scoped doors during the session. Override either to
-# relax. See 06_nemoclaw-hands-on-session.md, Module 4.
-NEMOCLAW_POLICY_MODE="${NEMOCLAW_POLICY_MODE:-enforce}"
+# Hands-on session posture: start with the restricted suggested preset set and
+# open scoped doors during the session. Override either to relax.
+NEMOCLAW_POLICY_MODE="${NEMOCLAW_POLICY_MODE:-suggested}"
 NEMOCLAW_POLICY_TIER="${NEMOCLAW_POLICY_TIER:-restricted}"
 # On a Brev host, tell the sandbox to allow the public tunnel origin for the
 # Control UI. The sandbox derives gateway.controlUi.allowedOrigins from

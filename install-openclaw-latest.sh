@@ -119,19 +119,33 @@ _prepend_path() {
   esac
 }
 
+load_nvm() {
+  local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$nvm_dir/nvm.sh" ]]; then
+    # shellcheck disable=SC1090
+    . "$nvm_dir/nvm.sh" >/dev/null 2>&1 || true
+  fi
+}
+
 # The official installer puts openclaw in the npm user prefix (default
-# ~/.npm-global/bin) and persists PATH only to ~/.bashrc / ~/.zshrc, which this
-# running shell has not sourced. Make openclaw resolvable for the current run.
+# ~/.npm-global/bin or the active nvm Node prefix) and persists PATH only to
+# shell rc files this running shell has not sourced. Make openclaw resolvable
+# for the current run.
 ensure_openclaw_on_path() {
-  local prefix
+  local prefix version_dir
   _prepend_path "$HOME/.npm-global/bin"
   _prepend_path "$HOME/.local/bin"
+  load_nvm
   if command -v npm >/dev/null 2>&1; then
     prefix="$(npm config get prefix 2>/dev/null || true)"
     if [[ -n "$prefix" && "$prefix" != "undefined" && "$prefix" != "null" ]]; then
       _prepend_path "$prefix/bin"
     fi
   fi
+  for version_dir in "$HOME"/.nvm/versions/node/*; do
+    [[ -d "$version_dir" && -e "$version_dir/bin/openclaw" ]] || continue
+    _prepend_path "$version_dir/bin"
+  done
 }
 
 install_openclaw() {
@@ -143,7 +157,7 @@ install_openclaw() {
   curl -fsSL "$OPENCLAW_INSTALL_URL" | OPENCLAW_VERSION="$OPENCLAW_VERSION" bash -s -- --no-onboard
 
   ensure_openclaw_on_path
-  command -v openclaw >/dev/null 2>&1 || fail "OpenClaw installed but 'openclaw' is not on PATH (looked in ~/.npm-global/bin, ~/.local/bin, npm prefix). Open a new shell and re-run."
+  command -v openclaw >/dev/null 2>&1 || fail "OpenClaw installed but 'openclaw' is not on PATH (looked in ~/.npm-global/bin, ~/.local/bin, npm prefix, nvm prefixes). Open a new shell and re-run."
   log "Installed OpenClaw $(openclaw --version 2>/dev/null || echo '(version unknown)')"
 }
 

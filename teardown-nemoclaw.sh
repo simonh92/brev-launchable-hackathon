@@ -43,6 +43,49 @@ run() {
   fi
 }
 
+load_nvm() {
+  local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  if [ -s "$nvm_dir/nvm.sh" ]; then
+    # shellcheck disable=SC1090
+    . "$nvm_dir/nvm.sh" >/dev/null 2>&1 || true
+  fi
+}
+
+show_nvm_packages() {
+  local pkg version_dir
+  [ -d "$HOME/.nvm/versions/node" ] || return 0
+  for version_dir in "$HOME"/.nvm/versions/node/*; do
+    [ -d "$version_dir" ] || continue
+    for pkg in "$@"; do
+      { [ -e "$version_dir/bin/$pkg" ] || [ -L "$version_dir/bin/$pkg" ]; } && echo "    present: $version_dir/bin/$pkg"
+      { [ -e "$version_dir/lib/node_modules/$pkg" ] || [ -L "$version_dir/lib/node_modules/$pkg" ]; } && echo "    present: $version_dir/lib/node_modules/$pkg"
+    done
+  done
+}
+
+remove_nvm_packages() {
+  local pkg version_dir removed
+  [ -d "$HOME/.nvm/versions/node" ] || return 0
+  for version_dir in "$HOME"/.nvm/versions/node/*; do
+    [ -d "$version_dir" ] || continue
+    for pkg in "$@"; do
+      if [ -e "$version_dir/bin/$pkg" ] || [ -L "$version_dir/bin/$pkg" ] ||
+         [ -e "$version_dir/lib/node_modules/$pkg" ] || [ -L "$version_dir/lib/node_modules/$pkg" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+          printf '  would: rm -rf %s %s\n' "$version_dir/bin/$pkg" "$version_dir/lib/node_modules/$pkg"
+        else
+          removed="$(basename "$version_dir")/$pkg"
+          rm -rf "$version_dir/bin/$pkg" "$version_dir/lib/node_modules/$pkg" \
+            && ok "removed nvm package $removed" \
+            || warn "skipped/failed: remove nvm package $removed"
+        fi
+      fi
+    done
+  done
+}
+
+load_nvm
+
 echo
 log "=== 1/5  Inspecting current NemoClaw footprint ==="
 echo "  binaries:"
@@ -55,6 +98,7 @@ for d in ~/.local/state/nemoclaw ~/.config/nemoclaw ~/.local/share/nemoclaw \
          ~/.cache/nemoclaw ~/nemoclaw ~/.nemoclaw; do
   [ -e "$d" ] && echo "    present: $d" || true
 done
+show_nvm_packages nemoclaw openshell openclaw
 echo "  docker containers:"
 docker ps -a --filter "name=openshell" --filter "name=nemoclaw" \
   --format '    {{.Names}} ({{.Status}})' 2>/dev/null || echo "    (docker unavailable)"
@@ -83,6 +127,7 @@ log "=== 3/5  Removing CLI, shims, npm links ==="
 run "npm rm -g nemoclaw openclaw openshell" npm rm -g nemoclaw openclaw openshell
 run "rm shim ~/.local/bin/nemoclaw"  rm -f "$HOME/.local/bin/nemoclaw"
 run "rm shim ~/.local/bin/openshell" rm -f "$HOME/.local/bin/openshell"
+remove_nvm_packages nemoclaw openclaw openshell
 
 log "=== 4/5  Removing config / state / source dirs ==="
 for d in "$HOME/.local/state/nemoclaw" "$HOME/.config/nemoclaw" \

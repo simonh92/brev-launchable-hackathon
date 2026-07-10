@@ -242,23 +242,35 @@ install_isaac_sim_render_drivers() {
   command -v apt-get >/dev/null 2>&1 || fail "Render driver install requires apt-get (Ubuntu/Debian)"
   require_cmd dpkg-query
 
-  # Find the NVIDIA driver branch already installed by Brev (e.g. 580).
-  branch="$(dpkg-query -W -f='${Package}\n' 'libnvidia-compute-*-server' 2>/dev/null \
-    | sed -n 's/^libnvidia-compute-\([0-9]\+\)-server$/\1/p' | head -n1)"
+  # Some Brev images install the driver via NVIDIA's .run installer instead of
+  # apt. In that case the GL/Vulkan userspace already ships with the driver and
+  # only the Vulkan loader/tools are missing.
+  if compgen -G '/usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.*' >/dev/null 2>&1 \
+      && { [[ -e /etc/vulkan/icd.d/nvidia_icd.json ]] || [[ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]]; }; then
+    log "Driver GL/Vulkan userspace already present (.run-installed driver); installing vulkan-tools only"
+    ensure_apt_updated
+    run_as_root env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y vulkan-tools
+  else
+    # Find the NVIDIA driver branch already installed by Brev (e.g. 580).
+    # "|| true": with pipefail, dpkg-query exits non-zero when nothing matches,
+    # which would otherwise kill the script silently before the check below.
+    branch="$(dpkg-query -W -f='${Package}\n' 'libnvidia-compute-*-server' 2>/dev/null \
+      | sed -n 's/^libnvidia-compute-\([0-9]\+\)-server$/\1/p' | head -n1 || true)"
 
-  if [[ -z "$branch" ]]; then
-    fail "No NVIDIA -server compute driver detected; aborting render driver install. Set INSTALL_RENDER_DRIVERS=0 to skip on non-GPU instances."
+    if [[ -z "$branch" ]]; then
+      fail "No NVIDIA -server compute driver detected; aborting render driver install. Set INSTALL_RENDER_DRIVERS=0 to skip on non-GPU instances."
+    fi
+
+    # Pin to the exact version of the installed compute package — avoids
+    # user-space / kernel-module skew that would silently break CUDA.
+    version="$(dpkg-query -W -f='${Version}' "libnvidia-compute-${branch}-server")"
+
+    log "Detected NVIDIA driver branch ${branch} (version ${version})"
+    ensure_apt_updated
+    run_as_root env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y \
+      "libnvidia-gl-${branch}-server=${version}" \
+      vulkan-tools
   fi
-
-  # Pin to the exact version of the installed compute package — avoids
-  # user-space / kernel-module skew that would silently break CUDA.
-  version="$(dpkg-query -W -f='${Version}' "libnvidia-compute-${branch}-server")"
-
-  log "Detected NVIDIA driver branch ${branch} (version ${version})"
-  ensure_apt_updated
-  run_as_root env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y \
-    "libnvidia-gl-${branch}-server=${version}" \
-    vulkan-tools
 
   # Verify: the GPU must appear in vulkaninfo.
   if ! vulkaninfo --summary 2>/dev/null | grep -q "DRIVER_ID_NVIDIA_PROPRIETARY"; then

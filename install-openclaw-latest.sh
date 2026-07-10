@@ -35,7 +35,7 @@ NODE_SETUP_MAJOR="${NODE_SETUP_MAJOR:-24}"
 NODE_EXACT_VERSION="${NODE_EXACT_VERSION:-24.18.0-1nodesource1}"
 RUN_ONBOARD="${RUN_ONBOARD:-1}"
 INSTALL_DAEMON="${INSTALL_DAEMON:-1}"
-# On a Brev host, allow the public tunnel origin (https://openclaw-<id>.brevlab.com)
+# On a Brev host, allow the public tunnel origin (https://openclaw-<id>.apps.run.brev.nvidia.com)
 # in the Control UI; official onboarding only allows localhost. Set 0 to skip.
 ALLOW_BREV_ORIGIN="${ALLOW_BREV_ORIGIN:-1}"
 # Auto-approve the first browser/device pairing(s) for a window after install, so
@@ -176,7 +176,7 @@ onboard_openclaw() {
   openclaw "${args[@]}"
 }
 
-# On Brev, the Control UI is reached via https://openclaw-<id>.brevlab.com, which
+# On Brev, the Control UI is reached via https://openclaw-<id>.apps.run.brev.nvidia.com, which
 # the stock onboarding does not allow-list. Append it (idempotently) and restart.
 allow_brev_origin() {
   local h id origin
@@ -192,7 +192,7 @@ allow_brev_origin() {
     return
   fi
 
-  origin="https://openclaw-${id}.brevlab.com"
+  origin="https://openclaw-${id}.apps.run.brev.nvidia.com"
   log "Allowing Brev Control UI origin: $origin"
   # Use the CLI so it writes the correct config file and coordinates with the
   # gateway. This overwrites allowedOrigins with localhost + the Brev origin
@@ -257,7 +257,7 @@ print_dashboard_info() {
   h="$(hostname 2>/dev/null || true)"
   id="${h#brev-}"
   if [[ -n "$id" && "$id" != "$h" ]]; then
-    origin="https://openclaw-${id}.brevlab.com"
+    origin="https://openclaw-${id}.apps.run.brev.nvidia.com"
   else
     origin="http://127.0.0.1:18789"
   fi

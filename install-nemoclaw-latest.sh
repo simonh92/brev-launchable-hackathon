@@ -32,7 +32,7 @@ set -euo pipefail
 #   ACCEPT_THIRD_PARTY=0        do NOT auto-accept third-party software (installer will prompt)
 #   FULL_WIZARD=1               run NemoClaw's full interactive wizard instead of presets
 #   ALLOW_BREV_ORIGIN=0         do NOT auto-allow the Brev tunnel origin for the Control UI
-#   CHAT_UI_URL                 explicit Control UI origin (default on Brev: https://openclaw-<id>.brevlab.com)
+#   CHAT_UI_URL                 explicit Control UI origin (default on Brev: https://openclaw-<id>.apps.run.brev.nvidia.com)
 #   INSTALL_DOCS_MCP=0          do NOT register the NemoClaw docs MCP server with Claude Code
 #   NEMOCLAW_INSTALL_URL        override installer URL (default: https://www.nvidia.com/nemoclaw.sh)
 #   NEMOCLAW_INSTALL_REF        pinned Git ref/SHA to install (default: frozen lkg SHA)
@@ -149,7 +149,7 @@ prompt_for_key() {
   export NVIDIA_INFERENCE_API_KEY="$key"
 }
 
-# Derive the Brev tunnel origin (https://openclaw-<id>.brevlab.com) from the
+# Derive the Brev tunnel origin (https://openclaw-<id>.apps.run.brev.nvidia.com) from the
 # hostname, so the sandbox is built allowing browser access over the tunnel.
 resolve_chat_ui_url() {
   if [[ -n "$CHAT_UI_URL" ]]; then
@@ -160,7 +160,7 @@ resolve_chat_ui_url() {
   h="$(hostname 2>/dev/null || true)"
   id="${h#brev-}"
   if [[ -n "$id" && "$id" != "$h" ]]; then
-    CHAT_UI_URL="https://openclaw-${id}.brevlab.com"
+    CHAT_UI_URL="https://openclaw-${id}.apps.run.brev.nvidia.com"
     log "Brev host detected — sandbox Control UI origin: $CHAT_UI_URL"
   fi
 }

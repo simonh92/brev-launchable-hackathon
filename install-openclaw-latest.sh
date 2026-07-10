@@ -203,9 +203,17 @@ allow_brev_origin() {
     return
   fi
 
+  # The apps.run tunnel reaches the instance over Brev's overlay network, NOT
+  # loopback. With the default gateway.bind=loopback Pomerium cannot connect
+  # and every dashboard request dies with a 503. Bind to all interfaces —
+  # token auth still applies, and 18789 is not exposed in the security group.
+  if ! openclaw config set gateway.bind lan; then
+    log "Failed to set gateway.bind=lan; the Brev dashboard URL will 503. Set it manually: openclaw config set gateway.bind lan"
+  fi
+
   # Apply by restarting the gateway (best effort; daemon or manual).
   openclaw gateway restart >/dev/null 2>&1 \
-    || log "Restart the gateway to apply the new origin (e.g. 'openclaw gateway restart')"
+    || log "Restart the gateway to apply the new origin/bind (e.g. 'openclaw gateway restart')"
 }
 
 # Each browser needs a one-time pairing approval from the Gateway host. Onboarding
@@ -226,13 +234,20 @@ auto_approve_devices() {
   cat > "$helper" <<'HLP'
 #!/usr/bin/env bash
 # Approve any pending device pairings until the deadline. Args: <openclaw-bin> <minutes>
+# NOTE: 'devices approve --latest' only SHOWS the newest pending request — it
+# does not approve anything. Approval requires the explicit request id, so we
+# extract the id from the --latest output and approve it in a second call.
 OC="$1"; MINUTES="$2"
 end=$(( $(date +%s) + MINUTES * 60 ))
 while [ "$(date +%s)" -lt "$end" ]; do
   n="$("$OC" devices list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j.pending||[]).length))}catch(e){process.stdout.write("0")}})' 2>/dev/null)"
   [ -z "$n" ] && n=0
   if [ "$n" -gt 0 ] 2>/dev/null; then
-    "$OC" devices approve --latest >/dev/null 2>&1 || true
+    id="$("$OC" devices approve --latest 2>&1 | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)"
+    if [ -n "$id" ]; then
+      "$OC" devices approve "$id" || true
+      echo "approved pairing request $id"
+    fi
   fi
   sleep 3
 done
@@ -240,7 +255,7 @@ HLP
   chmod +x "$helper"
 
   log "Auto-approving new device pairings for ${AUTO_APPROVE_MINUTES} min — open the dashboard within this window."
-  log "  (disable with AUTO_APPROVE_DEVICES=0; manual approve: 'openclaw devices approve --latest')"
+  log "  (disable with AUTO_APPROVE_DEVICES=0; manual approve: 'openclaw devices approve <requestId>' — get the id from 'openclaw devices approve --latest', which only shows it)"
   # setsid so the loop survives this shell exiting.
   setsid bash "$helper" "$oc" "$AUTO_APPROVE_MINUTES" >"$logf" 2>&1 </dev/null &
   disown 2>/dev/null || true
